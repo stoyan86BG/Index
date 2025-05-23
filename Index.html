@@ -1,0 +1,175 @@
+
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+    <meta charset="UTF-8">
+    <title>Крипто Стоп-Лос Калкулатор</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #111; color: #eee; padding: 20px; }
+        label, select, input, button { display: block; margin: 10px 0; }
+        .result { margin-top: 20px; font-size: 1.2em; }
+        .inline { display: inline-block; margin-right: 10px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #444; padding: 8px; text-align: left; }
+        th { background-color: #222; }
+    </style>
+</head>
+<body>
+    <h1>Калкулатор за Stop-Loss</h1>
+
+    <label for="crypto">Избери криптовалута:</label>
+    <select id="crypto"></select>
+
+    <datalist id="cryptoList"></datalist>
+    <div>
+        <input type="text" id="newCrypto" list="cryptoList" placeholder="Добави нова валута (напр. solana)" class="inline">
+        <button onclick="addCrypto()" class="inline">Добави</button>
+        <button onclick="refreshPrices()" class="inline">Обнови Цени</button>
+    </div>
+
+    <label for="drop">Процент спад (%):</label>
+    <input type="number" id="drop" value="5" min="0" step="0.1">
+
+    <button onclick="calculateStopLoss()">Изчисли Stop-Loss</button>
+
+    <div class="result" id="price"></div>
+    <div class="result" id="stoploss"></div>
+
+    <h2>Текущи Цени</h2>
+    <table id="priceTable">
+        <thead>
+            <tr>
+                <th>Валута</th>
+                <th>Цена (USD)</th>
+                <th>-5%</th>
+                <th>+5%</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+
+let allCoins = [];
+async function loadCoinList() {
+    try {
+        const res = await fetch("https://api.coingecko.com/api/v3/coins/list");
+        const data = await res.json();
+        allCoins = data;
+        const datalist = document.getElementById("cryptoList");
+        data.slice(0, 250).forEach(coin => {
+            const opt = document.createElement("option");
+            opt.value = coin.id;
+            datalist.appendChild(opt);
+        });
+    } catch (e) {
+        console.warn("Грешка при зареждане на списъка с валути.");
+    }
+}
+
+        function loadCryptos() {
+            const defaultCryptos = ['bitcoin', 'ethereum', 'coti', 'ripple', 'dogecoin'];
+            const saved = JSON.parse(localStorage.getItem('cryptoList'));
+            return saved && Array.isArray(saved) ? saved : defaultCryptos;
+        }
+
+        function saveCryptos(cryptos) {
+            localStorage.setItem('cryptoList', JSON.stringify(cryptos));
+        }
+
+        function populateCryptoSelect() {
+            const cryptos = loadCryptos();
+            const select = document.getElementById('crypto');
+            select.innerHTML = '';
+            cryptos.forEach(crypto => {
+                const option = document.createElement('option');
+                option.value = crypto;
+                option.textContent = crypto.charAt(0).toUpperCase() + crypto.slice(1);
+                select.appendChild(option);
+            });
+        }
+
+        async function fetchPrice(id) {
+            try {
+                const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`);
+                const data = await res.json();
+                return data[id] ? data[id].usd : null;
+            } catch {
+                return null;
+            }
+        }
+
+        async function calculateStopLoss() {
+            const crypto = document.getElementById('crypto').value;
+            const drop = parseFloat(document.getElementById('drop').value);
+            const price = await fetchPrice(crypto);
+
+            if (price === null) {
+                document.getElementById('price').textContent = 'Неуспешно зареждане на цена.';
+                document.getElementById('stoploss').textContent = '';
+                return;
+            }
+
+            const stopLoss = price * (1 - drop / 100);
+            document.getElementById('price').textContent = `Текуща цена: $${price.toFixed(6)}`;
+            document.getElementById('stoploss').textContent = `Stop-Loss при ${drop}% спад: $${stopLoss.toFixed(6)}`;
+        }
+
+        
+        async function isValidCrypto(id) {
+            try {
+                const res = await fetch(`https://api.coingecko.com/api/v3/coins/${id}`);
+                return res.status === 200;
+            } catch {
+                return false;
+            }
+        }
+
+        async function addCrypto() {
+    
+            const newCrypto = document.getElementById('newCrypto').value.trim().toLowerCase();
+            if (newCrypto) {
+                const cryptos = loadCryptos();
+                if (!cryptos.includes(newCrypto)) {
+                    const isValid = await isValidCrypto(newCrypto);
+                    if (!isValid) {
+                        alert("Невалиден CoinGecko ID: " + newCrypto + "\nМоля, избери валидна валута от списъка.");
+                        return;
+                    }
+                    cryptos.push(newCrypto);
+                    saveCryptos(cryptos);
+                    populateCryptoSelect();
+                    document.getElementById('crypto').value = newCrypto;
+                }
+                document.getElementById('newCrypto').value = '';
+                refreshPrices();
+            }
+        }
+
+        async function refreshPrices() {
+            const cryptos = loadCryptos();
+            const tbody = document.getElementById('priceTable').querySelector('tbody');
+            tbody.innerHTML = '';
+            for (const currency of cryptos) {
+                const price = await fetchPrice(currency);
+                const row = document.createElement('tr');
+                const minus5 = price ? (price * 0.95).toFixed(6) : '—';
+                const plus5 = price ? (price * 1.05).toFixed(6) : '—';
+                row.innerHTML = `
+                    <td>${currency.charAt(0).toUpperCase() + currency.slice(1)}</td>
+                    <td>${price ? '$' + price.toFixed(6) : 'Грешка'}</td>
+                    <td>${price ? '$' + minus5 : '—'}</td>
+                    <td>${price ? '$' + plus5 : '—'}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        window.onload = function () {
+    loadCoinList();
+            populateCryptoSelect();
+            refreshPrices();
+        };
+    </script>
+</body>
+</html>
